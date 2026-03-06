@@ -1,0 +1,53 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: sandbox
+
+# Feature gates needed for RuntimeClass scheduling and NetworkPolicy.
+featureGates:
+  RuntimeClassInTreeCloudProvider: true
+
+networking:
+  # Disable kindnet — we install Calico instead for NetworkPolicy support.
+  disableDefaultCNI: true
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"
+
+nodes:
+  # ── Control-plane node ──────────────────────────────────────────────────────
+  - role: control-plane
+    image: kindest/node:v1.29.2
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "sandbox.k8s.io/role=control"
+
+  # ── Execution worker 1 (gVisor will be installed here by local-up.sh) ───────
+  - role: worker
+    image: kindest/node:v1.29.2
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "sandbox.k8s.io/role=execution,sandbox.k8s.io/gvisor=true"
+    # Extra mounts give the gVisor installer write access to the node filesystem.
+    extraMounts:
+      - hostPath: /tmp/sandbox-gvisor-install
+        containerPath: /opt/gvisor
+        readOnly: false
+
+  # ── Execution worker 2 ───────────────────────────────────────────────────────
+  - role: worker
+    image: kindest/node:v1.29.2
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "sandbox.k8s.io/role=execution,sandbox.k8s.io/gvisor=true"
+    extraMounts:
+      - hostPath: /tmp/sandbox-gvisor-install
+        containerPath: /opt/gvisor
+        readOnly: false

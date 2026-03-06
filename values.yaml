@@ -1,0 +1,104 @@
+# ── Global ─────────────────────────────────────────────────────────────────────
+global:
+  # Cloud provider: gke | eks | aks
+  # Controls whether gVisor installer DaemonSet is deployed (not needed on GKE).
+  cloudProvider: gke
+
+# ── Control Plane Operator ──────────────────────────────────────────────────────
+operator:
+  replicaCount: 2
+  image:
+    repository: sandbox-operator
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Kubernetes node affinity: operator runs on control-plane nodes.
+  nodeSelector:
+    sandbox.k8s.io/role: control
+  tolerations:
+    - key: sandbox.k8s.io/control
+      operator: Exists
+      effect: NoSchedule
+  serviceAccount:
+    name: sandbox-operator
+  leaderElection: true
+  metrics:
+    enabled: true
+    port: 8080
+  healthProbe:
+    port: 8081
+  # Runtime image registry used by the operator to select execution images.
+  runtimeImages:
+    python: "python:3.11-slim"
+    nodejs: "node:20-slim"
+
+# ── Redis Dependency Cache ──────────────────────────────────────────────────────
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7.2-alpine"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Maximum memory before LRU eviction kicks in.
+  maxMemory: "512mb"
+  # Cache TTL passed to the operator (seconds).
+  cacheTTLSeconds: 86400
+  auth:
+    enabled: false
+    # If enabled, create a Secret named redis-auth with key "password".
+    existingSecret: ""
+    secretKey: "password"
+
+# ── Execution Plane ─────────────────────────────────────────────────────────────
+executionPlane:
+  # RuntimeClass name — must match the handler registered in containerd.
+  runtimeClassName: gvisor
+  runtimeHandler: runsc
+
+  # gVisor installer DaemonSet (EKS/AKS only — GKE manages this natively).
+  installer:
+    enabled: false   # set true for eks/aks
+    image:
+      repository: gvisor.dev/gvisor/installer
+      tag: latest
+    nodeSelector:
+      sandbox.k8s.io/role: execution
+
+  # Default resource limits applied to execution pods if not overridden per-job.
+  defaultResources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  # Default execution timeout (seconds).
+  defaultTimeoutSeconds: 30
+
+# ── Network Policy ───────────────────────────────────────────────────────────────
+networkPolicy:
+  # Deploy baseline default-deny policies in sandbox-execution namespace.
+  enabled: true
+  # Allow egress to PyPI and npm registries when jobs request network access.
+  allowedEgressHosts: []
+  #  - pypi.org
+  #  - registry.npmjs.org
+
+# ── Namespaces ────────────────────────────────────────────────────────────────
+namespaces:
+  control: sandbox-system
+  execution: sandbox-execution

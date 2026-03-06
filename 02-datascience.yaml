@@ -1,0 +1,67 @@
+apiVersion: sandbox.k8s.io/v1alpha1
+kind: SandboxJob
+metadata:
+  name: py-02-datascience
+  namespace: sandbox-system
+  labels:
+    sample.sandbox/category: python
+    sample.sandbox/expect: Succeeded
+spec:
+  runtime: python
+  packages:
+    - numpy==1.26.4
+    - pandas==2.2.1
+  timeoutSeconds: 120
+  resources:
+    cpu: "500m"
+    memory: "384Mi"
+  code:
+    inline: |
+      import numpy as np
+      import pandas as pd
+
+      print(f"NumPy  : {np.__version__}")
+      print(f"Pandas : {pd.__version__}")
+      print()
+
+      # ── NumPy ────────────────────────────────────────────────────────────────
+      rng  = np.random.default_rng(seed=42)
+      data = rng.normal(loc=100, scale=15, size=10_000)
+
+      print("── NumPy statistics (Normal μ=100, σ=15, n=10,000) ──")
+      print(f"  mean   : {data.mean():.4f}")
+      print(f"  std    : {data.std():.4f}")
+      print(f"  min    : {data.min():.4f}")
+      print(f"  max    : {data.max():.4f}")
+      print(f"  median : {np.median(data):.4f}")
+      print(f"  p95    : {np.percentile(data, 95):.4f}")
+
+      # Matrix operations
+      A = rng.standard_normal((64, 64))
+      B = rng.standard_normal((64, 64))
+      C = A @ B
+      print(f"\n── 64×64 matmul ──")
+      print(f"  shape : {C.shape}")
+      print(f"  trace : {np.trace(C):.4f}")
+
+      # ── Pandas ───────────────────────────────────────────────────────────────
+      print("\n── Pandas DataFrame ──")
+      df = pd.DataFrame({
+          "group" : rng.choice(["A","B","C"], size=200),
+          "score" : rng.integers(0, 100, size=200),
+          "weight": rng.uniform(0.5, 2.0, size=200),
+      })
+
+      summary = df.groupby("group").agg(
+          n       = ("score",  "count"),
+          avg     = ("score",  "mean"),
+          wgt_avg = ("weight", "mean"),
+      ).round(2)
+
+      print(summary.to_string())
+
+      # Pivot
+      top5 = df.nlargest(5, "score")[["group","score"]].reset_index(drop=True)
+      print(f"\nTop 5 scores:\n{top5.to_string(index=False)}")
+
+      print("\nALL CHECKS PASSED")

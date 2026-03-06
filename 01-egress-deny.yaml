@@ -1,0 +1,51 @@
+apiVersion: sandbox.k8s.io/v1alpha1
+kind: SandboxJob
+metadata:
+  name: sec-01-egress-deny
+  namespace: sandbox-system
+  labels:
+    sample.sandbox/category: security
+    sample.sandbox/expect: Succeeded
+spec:
+  runtime: python
+  # allowNetworkEgress is false by default — NetworkPolicy denies all egress.
+  allowNetworkEgress: false
+  timeoutSeconds: 30
+  code:
+    inline: |
+      import socket
+      import urllib.request
+      import urllib.error
+
+      print("── Egress lockdown verification ──")
+      print("allowNetworkEgress=false — all outbound traffic should be blocked.\n")
+
+      targets = [
+          ("1.1.1.1",    53,   "Cloudflare DNS"),
+          ("8.8.8.8",    53,   "Google DNS"),
+          ("93.184.216.34", 80, "example.com"),
+      ]
+
+      all_blocked = True
+      for host, port, label in targets:
+          try:
+              sock = socket.create_connection((host, port), timeout=3)
+              sock.close()
+              print(f"  ✗ REACHED {label} ({host}:{port}) — egress NOT blocked!")
+              all_blocked = False
+          except (socket.timeout, OSError) as e:
+              print(f"  ✓ BLOCKED {label} ({host}:{port}) — {type(e).__name__}")
+
+      print()
+      try:
+          urllib.request.urlopen("http://example.com", timeout=3)
+          print("  ✗ HTTP request to example.com SUCCEEDED — egress NOT blocked!")
+          all_blocked = False
+      except Exception as e:
+          print(f"  ✓ HTTP blocked: {type(e).__name__}: {e}")
+
+      print()
+      if all_blocked:
+          print("ALL CHECKS PASSED — egress is correctly blocked.")
+      else:
+          raise SystemExit("FAIL: Some egress was NOT blocked — check NetworkPolicy.")

@@ -1,0 +1,86 @@
+---
+# Create the ConfigMap that holds the source code.
+# In production, this would be created by your CI/CD pipeline or API server.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-analysis-code
+  namespace: sandbox-system
+  labels:
+    sample.sandbox/category: configmap
+data:
+  # The key name must match spec.code.configMapRef.key in the SandboxJob below.
+  analysis.py: |
+    import statistics, json, sys
+    from collections import defaultdict
+
+    print("── ConfigMap-sourced code execution ──")
+    print("Code was loaded from a ConfigMap (not inline).\n")
+
+    # Simulate processing a dataset passed via env var (JSON-encoded).
+    import os
+    raw = os.environ.get("DATASET", "[]")
+    try:
+        dataset = json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"Invalid DATASET env var: {raw!r}")
+        sys.exit(1)
+
+    if not dataset:
+        # Use built-in sample data if DATASET not provided.
+        dataset = [
+            {"region": "North",  "sales": 1200, "units": 48},
+            {"region": "South",  "sales":  950, "units": 38},
+            {"region": "East",   "sales": 1750, "units": 70},
+            {"region": "West",   "sales": 1100, "units": 44},
+            {"region": "North",  "sales": 1350, "units": 54},
+            {"region": "East",   "sales": 1600, "units": 64},
+            {"region": "South",  "sales":  800, "units": 32},
+            {"region": "West",   "sales": 1250, "units": 50},
+        ]
+        print("Using built-in sample dataset (8 records)\n")
+
+    # Aggregate by region
+    by_region = defaultdict(lambda: {"sales": [], "units": []})
+    for row in dataset:
+        by_region[row["region"]]["sales"].append(row["sales"])
+        by_region[row["region"]]["units"].append(row["units"])
+
+    print(f"{'Region':<10}  {'Avg Sales':>10}  {'Total Units':>12}  {'Median Sales':>13}")
+    print("-" * 52)
+    for region, vals in sorted(by_region.items()):
+        avg_s  = statistics.mean(vals["sales"])
+        tot_u  = sum(vals["units"])
+        med_s  = statistics.median(vals["sales"])
+        print(f"{region:<10}  {avg_s:>10.0f}  {tot_u:>12}  {med_s:>13.0f}")
+
+    all_sales = [r["sales"] for r in dataset]
+    print()
+    print(f"Overall mean   : {statistics.mean(all_sales):.0f}")
+    print(f"Overall stdev  : {statistics.stdev(all_sales):.0f}")
+    print(f"Overall median : {statistics.median(all_sales):.0f}")
+    print("\nALL CHECKS PASSED")
+
+---
+# SandboxJob that references the ConfigMap above.
+apiVersion: sandbox.k8s.io/v1alpha1
+kind: SandboxJob
+metadata:
+  name: cm-01-from-configmap
+  namespace: sandbox-system
+  labels:
+    sample.sandbox/category: configmap
+    sample.sandbox/expect: Succeeded
+spec:
+  runtime: python
+  timeoutSeconds: 30
+  # Code is loaded from the ConfigMap — not inlined into the SandboxJob spec.
+  code:
+    configMapRef:
+      name: sample-analysis-code
+      key: analysis.py
+  env:
+    # Optionally pass a JSON dataset via env var.
+    # Leave empty to use the built-in sample data in the script.
+    - name: DATASET
+      value: ""

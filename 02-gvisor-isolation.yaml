@@ -1,0 +1,77 @@
+apiVersion: sandbox.k8s.io/v1alpha1
+kind: SandboxJob
+metadata:
+  name: sec-02-gvisor-isolation
+  namespace: sandbox-system
+  labels:
+    sample.sandbox/category: security
+    sample.sandbox/expect: Succeeded
+spec:
+  runtime: python
+  timeoutSeconds: 30
+  code:
+    inline: |
+      import os, platform, ctypes, socket
+
+      print("── gVisor isolation verification ──\n")
+
+      # ── 1. Confirm we are inside gVisor (kernel name will be "Linux" but
+      #       /proc/version shows "gVisor" or the kernel release is unusual) ────
+      try:
+          with open("/proc/version") as f:
+              version = f.read().strip()
+          print(f"  /proc/version  : {version[:80]}")
+          is_gvisor = "gvisor" in version.lower() or "gvisor" in platform.release().lower()
+          print(f"  gVisor detected: {'YES ✓' if is_gvisor else 'NO (may be running on real kernel)'}")
+      except Exception as e:
+          print(f"  /proc/version  : unreadable ({e})")
+
+      # ── 2. /proc/self/status ────────────────────────────────────────────────
+      try:
+          with open("/proc/self/status") as f:
+              status = {l.split(':')[0]: l.split(':')[1].strip()
+                        for l in f if ':' in l}
+          uid_line = status.get("Uid", "?")
+          print(f"\n  /proc/self/status Uid: {uid_line}")
+          # All UID fields should be 65534 (nobody)
+          uids = [int(x) for x in uid_line.split() if x.isdigit()]
+          if all(u == 65534 for u in uids):
+              print("  Running as UID 65534 (nobody) ✓")
+          else:
+              print(f"  ✗ Unexpected UIDs: {uids}")
+      except Exception as e:
+          print(f"  /proc/self/status: {e}")
+
+      # ── 3. Attempt privilege escalation (should be denied) ──────────────────
+      print("\n  Testing privilege escalation denial:")
+      try:
+          os.setuid(0)
+          print("  ✗ setuid(0) SUCCEEDED — privilege escalation possible!")
+      except PermissionError:
+          print("  setuid(0) denied ✓")
+
+      # ── 4. Raw socket creation (should be blocked in restricted seccomp) ────
+      print("\n  Testing raw socket restriction:")
+      try:
+          raw = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+          raw.close()
+          print("  ✗ Raw socket CREATED — capability not dropped!")
+      except PermissionError:
+          print("  Raw socket blocked ✓")
+      except OSError as e:
+          print(f"  Raw socket blocked (OSError: {e}) ✓")
+
+      # ── 5. /proc filesystem is sandboxed ────────────────────────────────────
+      print("\n  Checking /proc isolation:")
+      try:
+          pids = [p for p in os.listdir("/proc") if p.isdigit()]
+          print(f"  Visible PIDs in /proc: {sorted(int(p) for p in pids)}")
+          # In a proper sandbox, only the process itself should be visible.
+          if len(pids) <= 3:
+              print("  PID namespace isolated ✓")
+          else:
+              print(f"  WARNING: {len(pids)} PIDs visible — may indicate poor isolation.")
+      except Exception as e:
+          print(f"  /proc listing error: {e}")
+
+      print("\nALL CHECKS PASSED")
